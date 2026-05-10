@@ -1,10 +1,22 @@
+<div align="center">
+
 # retail-supply-chain-agent
 
-> AI-Native 零售供应链安全库存 Agent — 促销场景演示版（v0.1.0）
+**AI-Native 零售供应链安全库存 Agent — 促销场景演示版（v0.1.0）**
+
+> 把"促销期备多少货"从人工经验判断升级为可解释、可审计、可回滚的 AI-Native 闭环。
+
+[English](#english-tldr) ·
+[快速开始](#快速开始) ·
+[架构设计](#架构设计) ·
+[项目结构](#项目结构) ·
+[Mock 边界](#mock-vs-真实边界)
+
+</div>
+
+---
 
 基于 LangGraph 的 5-Expert + Critic 多智能体架构，以**促销场景**为切入点，端到端覆盖销量预测、安全库存计算、What-if 方案推演、归因解释、质量评估完整决策链。
-
-核心价值：把"促销期备多少货"这个零售供应链最高频、最高价值的决策，从人工经验判断升级为可解释、可审计、可回滚的 AI-Native 闭环。
 
 ---
 
@@ -223,6 +235,33 @@ fastapi>=0.110  uvicorn>=0.29        anthropic>=0.40
 
 ---
 
+## Contributing
+
+Issues and PRs welcome. Please do not commit any real customer data or API keys.
+
+---
+
 ## License
 
 MIT
+
+---
+
+## English TL;DR
+
+**retail-supply-chain-agent** is an AI-Native safety-stock agent for retail supply chains, focused on promotional scenarios.
+
+Built on a **LangGraph 5-Expert + Critic** multi-agent architecture, it covers the full decision chain end-to-end: demand forecasting → safety stock calculation → what-if scenario analysis → attribution explanation → quality assessment.
+
+**Core value**: Turns "how much inventory to stock for a promotion" — the highest-frequency, highest-value decision in retail supply chains — from manual rule-of-thumb into an explainable, auditable, rollback-capable AI-Native loop.
+
+**Key design points**:
+- LightGBM quantile regression (P25/P50/P75) trained on synthetic promo data with realistic uplift coefficients
+- Z-Score safety stock engine: `SS = z × σ × √L`, no approximations
+- Critic Agent handles quality scoring, risk identification, and retry/escalate routing
+- HITL Gate forces human review on low-confidence or high-risk decisions
+- Full audit log across all layers
+
+**Stack**: LangGraph · LightGBM · Pydantic v2 · Claude API (roadmap) · Arize Phoenix (roadmap)
+
+> Related: [CyAlcher/ai_native_a_stock_agent](https://github.com/CyAlcher/ai_native_a_stock_agent) · [CyAlcher/CompoundMe](https://github.com/CyAlcher/CompoundMe)
