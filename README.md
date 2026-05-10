@@ -235,6 +235,26 @@ fastapi>=0.110  uvicorn>=0.29        anthropic>=0.40
 
 ---
 
+## Stay in Touch
+
+左边是**公众号**，更新项目动态与 AI-Native 供应链的实战内容；
+右边是**个人微信**，交流、反馈、提 bug、商业合作都欢迎。
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="imgs/gongzhonghao.jpg" alt="微信公众号" width="200"><br>
+      <sub>微信公众号</sub>
+    </td>
+    <td align="center">
+      <img src="imgs/kefu.png" alt="个人微信" width="200"><br>
+      <sub>个人微信（交流 / 反馈）</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## Contributing
 
 Issues and PRs welcome. Please do not commit any real customer data or API keys.
