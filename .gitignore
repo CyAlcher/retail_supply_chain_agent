@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.DS_Store
+.idea/
+.vscode/
+
+# 合成数据（可重新生成）
+data/promo_synthetic/promo_history.csv
+
+# 模型缓存（运行时生成）
+*.pkl
+*.joblib
