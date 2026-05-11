@@ -79,6 +79,7 @@ class ForecastAgent(BaseExpertAgent):
             avg_temp=task.weather.avg_temp if task.weather else 28.0,
             is_weekend=task.calendar.is_weekend if task.calendar else False,
             duration_days=task.forecast_horizon_days,
+            model_family=model_family,
         )
 
         # 统计基线模式：覆盖 model_used 标识
@@ -91,6 +92,8 @@ class ForecastAgent(BaseExpertAgent):
             p75=result["p75"],
             model_used=f"{result['model_used']} [routed: {route_reason[:40]}]",
             feature_importance=result.get("feature_importance", {}),
+            baseline_p50=result.get("baseline_p50"),
+            mape_vs_baseline=result.get("mape_vs_baseline"),
         )
         state.llm_call_count += 1
         return state

@@ -67,6 +67,8 @@ class ForecastResult(BaseModel):
     model_used: str
     feature_importance: dict[str, float] = Field(default_factory=dict)
     cache_hit: bool = False
+    baseline_p50: float | None = None
+    mape_vs_baseline: float | None = None
 
 class SafetyStockResult(BaseModel):
     safety_stock_units: float

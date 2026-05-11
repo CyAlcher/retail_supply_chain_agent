@@ -204,6 +204,9 @@ def _print_result(state, case_id: str) -> None:
         print(f"\n[Forecast]  ML预测工具调用 → "
               f"P25={fc.p25:.0f}  P50={fc.p50:.0f}  P75={fc.p75:.0f}"
               f"  模型={fc.model_used}")
+        if fc.baseline_p50 is not None:
+            print(f"            统计基线 P50={fc.baseline_p50:.0f}"
+                  f"  vs LGB偏差={fc.mape_vs_baseline:.1f}%")
         if fc.feature_importance:
             top = sorted(fc.feature_importance.items(), key=lambda x: -x[1])[:3]
             print(f"            特征重要性: {dict(top)}")
