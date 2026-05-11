@@ -64,6 +64,70 @@ CASES = {
             "recommended_not_empty": True,
         },
     },
+    "DEV-PROMO-003": {
+        "question": (
+            "华润万家天河店，可口可乐 330ml，上周促销实际销量 1800 件，"
+            "但预测是 2375 件，偏差 -24.5%，帮我分析偏差原因。"
+        ),
+        "overrides": {
+            "task_id": "DEV-PROMO-003",
+            "weather": WeatherFactor(avg_temp=28.0, rain_prob=0.7),
+            "calendar": CalendarFactor(is_weekend=True),
+            "promo": PromoFactor(
+                discount_rate=0.25,
+                start_date="2026-06-06",
+                end_date="2026-06-08",
+                duration_days=3,
+            ),
+        },
+        "assertions": {
+            "explain_has_drivers": True,
+            "confidence_not_reject": True,
+        },
+    },
+    "DEV-PROMO-004": {
+        "question": (
+            "华润万家广州区 3 家门店（天河店、越秀店、海珠店），"
+            "可口可乐 330ml，下周统一做 20% 折扣促销 3 天，"
+            "分别预测各门店销量并汇总备货建议。"
+        ),
+        "overrides": {
+            "task_id": "DEV-PROMO-004",
+            "weather": WeatherFactor(avg_temp=31.0),
+            "calendar": CalendarFactor(is_weekend=False),
+            "promo": PromoFactor(
+                discount_rate=0.20,
+                start_date="2026-06-20",
+                end_date="2026-06-22",
+                duration_days=3,
+            ),
+        },
+        "assertions": {
+            "action_type": "下单",
+            "confidence_not_reject": True,
+        },
+    },
+    "DEV-PROMO-005": {
+        "question": (
+            "华润万家天河店，可口可乐 330ml，下周促销期间气象局发布暴雨橙色预警，"
+            "预计降雨概率 85%，是否需要下调备货量？"
+        ),
+        "overrides": {
+            "task_id": "DEV-PROMO-005",
+            "weather": WeatherFactor(avg_temp=24.0, rain_prob=0.85, alert_level="暴雨橙色"),
+            "calendar": CalendarFactor(is_weekend=True),
+            "promo": PromoFactor(
+                discount_rate=0.25,
+                start_date="2026-06-27",
+                end_date="2026-06-29",
+                duration_days=3,
+            ),
+        },
+        "assertions": {
+            "has_weather_risk": True,
+            "confidence_not_reject": True,
+        },
+    },
 }
 
 TODOS = """
@@ -233,6 +297,18 @@ def _validate(state, assertions: dict) -> bool:
     if "recommended_not_empty" in assertions and wi:
         ok = bool(wi.recommended)
         print(f"  推荐方案非空: {wi.recommended!r}  {'✓' if ok else '✗ FAIL'}")
+        passed = passed and ok
+
+    if "explain_has_drivers" in assertions:
+        ex = state.explain_result
+        ok = ex is not None and len(ex.key_drivers) > 0
+        print(f"  归因因子非空: {len(ex.key_drivers) if ex else 0}个  {'✓' if ok else '✗ FAIL'}")
+        passed = passed and ok
+
+    if "has_weather_risk" in assertions:
+        cv = state.critic_verdict
+        ok = cv is not None and any("气象" in r or "暴雨" in r or "天气" in r for r in (cv.risks or []))
+        print(f"  包含气象风险提示: {'✓' if ok else '✗ FAIL'}")
         passed = passed and ok
 
     print(f"\n  总结: {'全部通过 ✓' if passed else '存在失败项 ✗'}")

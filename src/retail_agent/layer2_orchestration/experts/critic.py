@@ -177,6 +177,12 @@ class CriticAgent(BaseExpertAgent):
             quality, risks = _rule_score(state)
             self._llm_reflection = None
 
+        # 气象预警强制注入，不依赖 LLM 判断
+        if state.task.weather and state.task.weather.alert_level:
+            alert_msg = f"气象预警: {state.task.weather.alert_level}"
+            if not any("气象" in r or "预警" in r for r in risks):
+                risks.append(alert_msg)
+
         interval = (fc.p75 - fc.p25) if fc else 0
         tier = ConfidenceTier.AUTO
         if risks:
