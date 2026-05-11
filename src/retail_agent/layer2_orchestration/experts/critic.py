@@ -74,9 +74,12 @@ def _llm_score(state: PlannerState) -> dict | None:
                 "service_level": ss.service_level,
             } if ss else None,
             "what_if_scenarios": len(wi.scenarios) if wi else 0,
-            "action": ac.action_type if ac else None,
+            # action 在 Critic 之后由 ActionBuilder 生成，此处为 null 属正常时序，不应视为风险
+            "action_note": "action 由 ActionBuilder 在 Critic 评分之后生成，null 为正常时序",
             "plan_experts": state.plan_experts,
-            "visited_experts": [a["expert"] for a in state.audit_trail if a.get("status") == "ok"],
+            "visited_experts": list(dict.fromkeys(
+                a["expert"] for a in state.audit_trail if a.get("status") == "ok"
+            )),
             "retry_count": state.retry_count,
         }
 
@@ -84,6 +87,7 @@ def _llm_score(state: PlannerState) -> dict | None:
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
+            timeout=30.0,
             system=_RUBRIC_SYSTEM,
             tools=[_RUBRIC_TOOL],
             tool_choice={"type": "tool", "name": "quality_score"},

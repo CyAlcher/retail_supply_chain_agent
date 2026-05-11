@@ -32,6 +32,7 @@ def _llm_narrative(factors: list[AttributionFactor], p50: float, task_info: dict
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,
+            timeout=30.0,
             system=_EXPLAIN_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )

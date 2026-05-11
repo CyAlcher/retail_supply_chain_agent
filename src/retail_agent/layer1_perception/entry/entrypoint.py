@@ -55,6 +55,7 @@ def _parse_with_llm(question: str) -> dict:
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=512,
+        timeout=30.0,
         system=_SYSTEM_PROMPT,
         tools=[_PARSE_TOOL],
         tool_choice={"type": "tool", "name": "parse_retail_query"},

@@ -49,6 +49,7 @@ def _route_model(state: PlannerState) -> tuple[str, str]:
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
+            timeout=30.0,
             system=_ROUTER_SYSTEM,
             tools=[_ROUTER_TOOL],
             tool_choice={"type": "tool", "name": "select_forecast_model"},
