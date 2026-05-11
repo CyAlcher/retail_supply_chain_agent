@@ -326,11 +326,29 @@ def main():
     ap.add_argument("--validate", action="store_true", help="跑完后检查硬断言")
     ap.add_argument("--show-todos", action="store_true", help="打印 Hardcode/TODO 清单")
     ap.add_argument("--replay", metavar="TASK_ID", help="从 SQLite checkpoint 重放历史决策")
+    ap.add_argument("--rollback", metavar="VERSION", help="回滚到指定版本（如 v0.1.0）")
+    ap.add_argument("--list-versions", action="store_true", help="列出所有已注册版本")
     args = ap.parse_args()
 
     if args.show_todos:
         print(TODOS)
         return
+
+    if args.list_versions:
+        from retail_agent.versioning import list_versions, current_version
+        versions = list_versions()
+        cur = current_version()
+        if not versions:
+            print("暂无已注册版本。")
+        for v in versions:
+            marker = " ← current" if v["version"] == cur else ""
+            print(f"  {v['version']}{marker}  model={v['model_tag']}  {v['created_at'][:10]}  {v['notes']}")
+        return
+
+    if args.rollback:
+        from retail_agent.versioning import rollback
+        ok = rollback(args.rollback)
+        sys.exit(0 if ok else 1)
 
     if args.replay:
         from retail_agent.layer2_orchestration.planner.planner import replay
@@ -340,10 +358,6 @@ def main():
             print(f"未找到 {args.replay} 的历史记录，请先运行该 case。")
             sys.exit(1)
         _print_result(final_state, args.replay)
-        return
-
-    if args.show_todos:
-        print(TODOS)
         return
 
     cfg = CASES[args.case]
