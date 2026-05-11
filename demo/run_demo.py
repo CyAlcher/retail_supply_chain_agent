@@ -246,7 +246,22 @@ def main():
     ap.add_argument("--case", choices=list(CASES.keys()), default="DEV-PROMO-001")
     ap.add_argument("--validate", action="store_true", help="跑完后检查硬断言")
     ap.add_argument("--show-todos", action="store_true", help="打印 Hardcode/TODO 清单")
+    ap.add_argument("--replay", metavar="TASK_ID", help="从 SQLite checkpoint 重放历史决策")
     args = ap.parse_args()
+
+    if args.show_todos:
+        print(TODOS)
+        return
+
+    if args.replay:
+        from retail_agent.layer2_orchestration.planner.planner import replay
+        print(f"\n正在重放 {args.replay} 的历史决策...")
+        final_state = replay(args.replay)
+        if final_state is None:
+            print(f"未找到 {args.replay} 的历史记录，请先运行该 case。")
+            sys.exit(1)
+        _print_result(final_state, args.replay)
+        return
 
     if args.show_todos:
         print(TODOS)

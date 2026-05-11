@@ -9,7 +9,7 @@ from pathlib import Path
 RNG = np.random.default_rng(42)
 OUT = Path(__file__).parent / "promo_history.csv"
 
-def generate(n_days: int = 180) -> pd.DataFrame:
+def generate(n_days: int = 540) -> pd.DataFrame:
     dates = pd.date_range("2025-09-01", periods=n_days, freq="D")
     baseline = RNG.normal(600, 80, n_days).clip(300, 1000)
 

@@ -1,11 +1,12 @@
 """LangGraph StateGraph 主编排图
-真实 LangGraph 图结构，MemorySaver checkpointer（演示用）
-TODO(真实化): 替换为 PostgresSaver，接入真实 Claude API
+真实 LangGraph 图结构，SqliteSaver checkpointer（支持决策回放）
 """
 from __future__ import annotations
+import os
+import sqlite3
 from typing import Any
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from retail_agent.schemas import PlannerState, Scenario, ReflectionAction
 from retail_agent.layer1_perception.context import builder as ctx_builder
@@ -186,7 +187,14 @@ def build_graph():
     g.add_edge("hitl",           "audit")
     g.add_edge("audit",          END)
 
-    return g.compile(checkpointer=MemorySaver())
+    db_path = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "..", "..", "data", "checkpoints.db"
+    ))
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
+    checkpointer.setup()
+    return g.compile(checkpointer=checkpointer)
 
 
 GRAPH = build_graph()
@@ -196,3 +204,12 @@ def run(state: PlannerState) -> PlannerState:
     config = {"configurable": {"thread_id": state.task.task_id}}
     result = GRAPH.invoke(_state_to_dict(state), config=config)
     return _dict_to_state(result)
+
+
+def replay(task_id: str) -> PlannerState | None:
+    """重放历史决策，从 SQLite checkpoint 恢复最终状态"""
+    config = {"configurable": {"thread_id": task_id}}
+    result = GRAPH.get_state(config)
+    if result and result.values:
+        return _dict_to_state(result.values)
+    return None
