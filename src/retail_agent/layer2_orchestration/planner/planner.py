@@ -203,8 +203,17 @@ GRAPH = build_graph()
 def run(state: PlannerState) -> PlannerState:
     config = {"configurable": {"thread_id": state.task.task_id}}
     # 清除同 thread_id 的历史 checkpoint，避免 audit_trail 累积
+    # 用独立连接执行删除，避免 SQLite 连接复用导致删除未生效
     try:
-        GRAPH.checkpointer.delete_thread(state.task.task_id)
+        import sqlite3 as _sqlite3
+        _db_path = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", "..", "..", "data", "checkpoints.db"
+        ))
+        with _sqlite3.connect(_db_path) as _conn:
+            from langgraph.checkpoint.sqlite import SqliteSaver as _S
+            _tmp = _S(_conn)
+            _tmp.setup()
+            _tmp.delete_thread(state.task.task_id)
     except Exception:
         pass
     result = GRAPH.invoke(_state_to_dict(state), config=config)

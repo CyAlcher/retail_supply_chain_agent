@@ -1,0 +1,204 @@
+# Critic LLM-as-Judge 校准集
+# 格式：每条样本包含预测上下文 + 人工标注的期望评分区间
+# 用途：运行 run_calibration.py 验证 LLM 评分与人工标注的一致性
+
+calibration_samples:
+
+  # ── 好的预测（5条）──────────────────────────────────────────────
+  - id: CAL-GOOD-001
+    label: good
+    description: 区间窄、覆盖天数足、所有 Expert 都跑了
+    context:
+      forecast: {p25: 2100, p50: 2300, p75: 2450, interval_width: 350, model: lgb_quantile_uplift}
+      safety_stock: {units: 1100, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 0
+    expected_score_range: [0.82, 1.00]
+    expected_reflection: accept
+
+  - id: CAL-GOOD-002
+    label: good
+    description: 高折扣促销，预测合理，覆盖充足
+    context:
+      forecast: {p25: 3200, p50: 3500, p75: 3750, interval_width: 550, model: lgb_quantile_uplift}
+      safety_stock: {units: 1200, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 0
+    expected_score_range: [0.80, 1.00]
+    expected_reflection: accept
+
+  - id: CAL-GOOD-003
+    label: good
+    description: 非促销场景，基线预测稳定
+    context:
+      forecast: {p25: 550, p50: 600, p75: 650, interval_width: 100, model: statistical_baseline}
+      safety_stock: {units: 400, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 0
+      plan_experts: [forecast, safety_stock, explain]
+      visited_experts: [forecast, safety_stock, explain]
+      retry_count: 0
+    expected_score_range: [0.85, 1.00]
+    expected_reflection: accept
+
+  - id: CAL-GOOD-004
+    label: good
+    description: 多次 retry 后收敛，最终质量高
+    context:
+      forecast: {p25: 1900, p50: 2100, p75: 2250, interval_width: 350, model: lgb_quantile_uplift}
+      safety_stock: {units: 1050, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 1
+    expected_score_range: [0.78, 1.00]
+    expected_reflection: accept
+
+  - id: CAL-GOOD-005
+    label: good
+    description: 气象预警场景，风险已识别，覆盖充足
+    context:
+      forecast: {p25: 1800, p50: 2000, p75: 2200, interval_width: 400, model: lgb_quantile_uplift}
+      safety_stock: {units: 1100, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 0
+      weather_alert: "暴雨橙色"
+    expected_score_range: [0.75, 0.95]
+    expected_reflection: accept
+
+  # ── 中等预测（5条）──────────────────────────────────────────────
+  - id: CAL-MED-001
+    label: medium
+    description: 区间偏宽，不确定性较高
+    context:
+      forecast: {p25: 1500, p50: 2200, p75: 2900, interval_width: 1400, model: lgb_quantile_uplift}
+      safety_stock: {units: 1100, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 1
+    expected_score_range: [0.55, 0.78]
+    expected_reflection: escalate_hitl
+
+  - id: CAL-MED-002
+    label: medium
+    description: 覆盖天数不足，安全库存偏低
+    context:
+      forecast: {p25: 800, p50: 1000, p75: 1150, interval_width: 350, model: lgb_quantile_uplift}
+      safety_stock: {units: 200, coverage_days: 5, service_level: 0.90}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 0
+    expected_score_range: [0.55, 0.78]
+    expected_reflection: escalate_hitl
+
+  - id: CAL-MED-003
+    label: medium
+    description: 缺少 what_if，促销场景不完整，但预测本身质量尚可
+    context:
+      forecast: {p25: 2000, p50: 2200, p75: 2400, interval_width: 400, model: lgb_quantile_uplift}
+      safety_stock: {units: 1100, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 0
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, explain]
+      retry_count: 0
+    expected_score_range: [0.60, 0.92]
+    expected_reflection: accept
+
+  - id: CAL-MED-004
+    label: medium
+    description: 已 retry 2 次，区间仍偏宽
+    context:
+      forecast: {p25: 1200, p50: 2000, p75: 2800, interval_width: 1600, model: lgb_quantile_uplift}
+      safety_stock: {units: 1100, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 2
+    expected_score_range: [0.50, 0.72]
+    expected_reflection: escalate_hitl
+
+  - id: CAL-MED-005
+    label: medium
+    description: 服务水平偏低（90%），覆盖天数临界，但预测区间合理
+    context:
+      forecast: {p25: 1800, p50: 2100, p75: 2350, interval_width: 550, model: lgb_quantile_uplift}
+      safety_stock: {units: 600, coverage_days: 8, service_level: 0.90}
+      what_if_scenarios: 2
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock, what_if, explain]
+      retry_count: 0
+    expected_score_range: [0.62, 0.92]
+    expected_reflection: accept
+
+  # ── 差的预测（5条）──────────────────────────────────────────────
+  - id: CAL-BAD-001
+    label: bad
+    description: 预测结果缺失，无法执行
+    context:
+      forecast: null
+      safety_stock: null
+      what_if_scenarios: 0
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: []
+      retry_count: 2
+    expected_score_range: [0.00, 0.45]
+    expected_reflection: abort
+
+  - id: CAL-BAD-002
+    label: bad
+    description: 区间极宽（>2000），完全不可信
+    context:
+      forecast: {p25: 500, p50: 2000, p75: 3500, interval_width: 3000, model: lgb_quantile_uplift}
+      safety_stock: {units: 1100, coverage_days: 30, service_level: 0.95}
+      what_if_scenarios: 0
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock]
+      retry_count: 2
+    expected_score_range: [0.20, 0.50]
+    expected_reflection: escalate_hitl
+
+  - id: CAL-BAD-003
+    label: bad
+    description: 安全库存为 0，覆盖天数为 0
+    context:
+      forecast: {p25: 1800, p50: 2000, p75: 2200, interval_width: 400, model: lgb_quantile_uplift}
+      safety_stock: {units: 0, coverage_days: 0, service_level: 0.50}
+      what_if_scenarios: 0
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: [forecast, safety_stock]
+      retry_count: 0
+    expected_score_range: [0.25, 0.55]
+    expected_reflection: escalate_hitl
+
+  - id: CAL-BAD-004
+    label: bad
+    description: 所有 Expert 均未执行，只有 plan
+    context:
+      forecast: null
+      safety_stock: null
+      what_if_scenarios: 0
+      plan_experts: [forecast, safety_stock, explain, what_if]
+      visited_experts: []
+      retry_count: 0
+    expected_score_range: [0.00, 0.40]
+    expected_reflection: abort
+
+  - id: CAL-BAD-005
+    label: bad
+    description: 预测 P50 为负数（数据异常）
+    context:
+      forecast: {p25: -500, p50: -200, p75: 100, interval_width: 600, model: statistical_baseline}
+      safety_stock: {units: 100, coverage_days: 2, service_level: 0.80}
+      what_if_scenarios: 0
+      plan_experts: [forecast, safety_stock]
+      visited_experts: [forecast, safety_stock]
+      retry_count: 1
+    expected_score_range: [0.00, 0.35]
+    expected_reflection: abort

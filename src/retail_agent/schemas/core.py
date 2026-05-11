@@ -108,10 +108,14 @@ class QualityScore(BaseModel):
 
     @property
     def weighted_total(self) -> float:
-        weights = [0.25, 0.15, 0.20, 0.20, 0.10, 0.10]
+        # accuracy 和 business_value 是核心业务指标，权重提升
+        weights = [0.35, 0.15, 0.10, 0.15, 0.10, 0.15]
         scores  = [self.accuracy, self.completeness, self.compliance,
                    self.executability, self.process_rationality, self.business_value]
-        return sum(w * s for w, s in zip(weights, scores))
+        base = sum(w * s for w, s in zip(weights, scores))
+        # 一票否决：accuracy 或 business_value 极低时，总分不超过其 2 倍
+        floor = min(self.accuracy * 2, self.business_value * 2, 1.0)
+        return round(min(base, floor), 3)
 
 class UncertaintyReport(BaseModel):
     p25: float

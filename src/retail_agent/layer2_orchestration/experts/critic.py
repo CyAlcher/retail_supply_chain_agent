@@ -1,5 +1,6 @@
-"""CriticAgent：LLM-as-Judge 质量评估（6 项职责）
-主路径用 Claude structured output 评分，fallback 到规则判断
+"""CriticAgent：规则评分（主路径）+ Claude LLM 风险识别与 reflection 决策
+数值评分由规则确定性计算，LLM 只做语义层面的风险识别和反思决策。
+这样评分稳定可控，LLM 的语义理解用在它擅长的地方。
 """
 from __future__ import annotations
 import os
@@ -11,56 +12,127 @@ from retail_agent.schemas import (
 )
 from .base import BaseExpertAgent
 
-_WAPE_THRESHOLD = 0.30
-_INTERVAL_MAX   = 1200
-_RETRY_MAX      = 2
+_INTERVAL_THRESHOLDS = [(400, 1.0), (800, 0.8), (1200, 0.6), (2000, 0.4)]
+_RETRY_MAX = 2
 
-_RUBRIC_SYSTEM = """你是零售供应链 AI 系统的质量评审官。
-对预测结果按六个维度打分（0.0~1.0），返回 JSON。
+_RISK_SYSTEM = """你是零售供应链 AI 系统的风险识别专家。
+根据预测上下文，识别业务层面的真实风险（不超过3条），并给出 reflection 决策。
 
-评分维度：
-- accuracy: 预测区间合理性（区间越窄、P50 越合理分越高）
-- completeness: 必要字段齐全程度
-- compliance: 无违规工具调用
-- executability: 输出是否可直接执行
-- process_rationality: 决策链节点覆盖完整度
-- business_value: 安全库存覆盖天数是否满足业务需求
+## 风险识别规则
+- 只报告真实的业务风险，不报告系统时序问题
+- action 和 explain 在 Critic 之后生成，null 为正常时序，不是风险
+- 关注：预测区间宽度、安全库存覆盖、气象预警、数据质量
 
-同时输出：
-- risks: 风险列表（字符串数组）
-- reflection: "accept" | "retry_forecast" | "escalate_hitl" | "abort"
+## reflection 决策规则（严格遵守）
+- forecast 存在 + 区间宽度 < 1200 + coverage_days >= 7 + 无高风险 → accept
+- forecast 存在但区间宽度 1200~2000 或 coverage_days 3~7 → escalate_hitl
+- forecast 为 null 或 P50 为负数 → abort
+- 其他情况 → escalate_hitl
 
-严格返回 JSON，不要其他文字。"""
+## 重要：大多数正常促销预测应该返回 accept，不要过度保守"""
 
-_RUBRIC_TOOL = {
-    "name": "quality_score",
-    "description": "对预测结果进行六维质量评分",
+_RISK_TOOL = {
+    "name": "identify_risks",
+    "description": "识别预测结果的业务风险并给出反思决策",
     "input_schema": {
         "type": "object",
         "properties": {
-            "accuracy":            {"type": "number", "minimum": 0, "maximum": 1},
-            "completeness":        {"type": "number", "minimum": 0, "maximum": 1},
-            "compliance":          {"type": "number", "minimum": 0, "maximum": 1},
-            "executability":       {"type": "number", "minimum": 0, "maximum": 1},
-            "process_rationality": {"type": "number", "minimum": 0, "maximum": 1},
-            "business_value":      {"type": "number", "minimum": 0, "maximum": 1},
-            "risks":               {"type": "array", "items": {"type": "string"}},
-            "reflection":          {"type": "string",
-                                    "enum": ["accept", "retry_forecast", "escalate_hitl", "abort"]},
+            "risks": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "业务风险列表（最多3条，只报告真实风险）",
+            },
+            "reflection": {
+                "type": "string",
+                "enum": ["accept", "retry_forecast", "escalate_hitl", "abort"],
+            },
         },
-        "required": ["accuracy", "completeness", "compliance", "executability",
-                     "process_rationality", "business_value", "risks", "reflection"],
+        "required": ["risks", "reflection"],
     },
 }
 
 
-def _llm_score(state: PlannerState) -> dict | None:
-    """调用 Claude LLM-as-Judge，返回评分 dict，失败返回 None"""
+def _rule_score(state: PlannerState) -> QualityScore:
+    """规则确定性评分，稳定可控"""
+    fc = state.forecast_result
+    ss = state.safety_stock_result
+
+    # accuracy：区间宽度分级（更严格）
+    if fc is None or (hasattr(fc, 'p50') and fc.p50 < 0):
+        accuracy = 0.0
+    else:
+        interval = fc.p75 - fc.p25
+        if interval < 400:
+            accuracy = 1.0
+        elif interval < 800:
+            accuracy = 0.75
+        elif interval < 1200:
+            accuracy = 0.50
+        elif interval < 2000:
+            accuracy = 0.30
+        else:
+            accuracy = 0.10
+
+    # completeness：必要字段齐全
+    completeness = 1.0
+    if not fc:
+        completeness = 0.10
+    elif not ss:
+        completeness = 0.65
+
+    # executability：visited_experts 覆盖率
+    visited  = set(dict.fromkeys(
+        a["expert"] for a in state.audit_trail if a.get("status") == "ok"
+    ))
+    required = set(state.plan_experts)
+    coverage = len(visited & required) / max(len(required), 1)
+    if coverage >= 0.8:
+        executability = 1.0
+    elif coverage >= 0.6:
+        executability = 0.65
+    elif coverage >= 0.4:
+        executability = 0.45
+    else:
+        executability = 0.20
+
+    # process_rationality：retry 次数
+    if not visited:
+        process = 0.05
+    elif state.retry_count == 0:
+        process = 1.0
+    elif state.retry_count == 1:
+        process = 0.75
+    else:
+        process = 0.50
+
+    # business_value：安全库存覆盖天数（更严格）
+    if ss is None:
+        biz = 0.10
+    elif ss.coverage_days >= 14:
+        biz = 1.0
+    elif ss.coverage_days >= 7:
+        biz = 0.75
+    elif ss.coverage_days >= 3:
+        biz = 0.30   # 3~7天：明显不足，拉低总分
+    else:
+        biz = 0.05
+
+    return QualityScore(
+        accuracy=accuracy,
+        completeness=completeness,
+        compliance=1.0,
+        executability=executability,
+        process_rationality=round(process, 2),
+        business_value=biz,
+    )
+
+
+def _llm_risks(state: PlannerState) -> tuple[list[str], ReflectionAction | None]:
+    """调用 Claude 识别业务风险和 reflection 决策，失败返回 ([], None)"""
     try:
         fc = state.forecast_result
         ss = state.safety_stock_result
         wi = state.what_if_result
-        ac = state.action
 
         context = {
             "forecast": {
@@ -74,8 +146,7 @@ def _llm_score(state: PlannerState) -> dict | None:
                 "service_level": ss.service_level,
             } if ss else None,
             "what_if_scenarios": len(wi.scenarios) if wi else 0,
-            # action 在 Critic 之后由 ActionBuilder 生成，此处为 null 属正常时序，不应视为风险
-            "action_note": "action 由 ActionBuilder 在 Critic 评分之后生成，null 为正常时序",
+            "timing_note": "action 和 explain 在 Critic 之后生成，null 为正常时序，不是风险",
             "plan_experts": state.plan_experts,
             "visited_experts": list(dict.fromkeys(
                 a["expert"] for a in state.audit_trail if a.get("status") == "ok"
@@ -86,61 +157,62 @@ def _llm_score(state: PlannerState) -> dict | None:
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=512,
+            max_tokens=256,
             timeout=30.0,
-            system=_RUBRIC_SYSTEM,
-            tools=[_RUBRIC_TOOL],
-            tool_choice={"type": "tool", "name": "quality_score"},
+            system=_RISK_SYSTEM,
+            tools=[_RISK_TOOL],
+            tool_choice={"type": "tool", "name": "identify_risks"},
             messages=[{
                 "role": "user",
-                "content": f"请对以下预测结果进行质量评分：\n{json.dumps(context, ensure_ascii=False)}",
+                "content": f"请识别以下预测结果的业务风险：\n{json.dumps(context, ensure_ascii=False)}",
             }],
         )
         for block in resp.content:
-            if block.type == "tool_use" and block.name == "quality_score":
-                return block.input
+            if block.type == "tool_use" and block.name == "identify_risks":
+                refl_map = {
+                    "accept":         ReflectionAction.ACCEPT,
+                    "retry_forecast": ReflectionAction.RETRY_FORECAST,
+                    "escalate_hitl":  ReflectionAction.ESCALATE_HITL,
+                    "abort":          ReflectionAction.ABORT,
+                }
+                risks = block.input.get("risks", [])
+                reflection = refl_map.get(block.input.get("reflection", "accept"))
+                return risks, reflection
     except Exception:
         pass
-    return None
+    return [], None
 
 
-def _rule_score(state: PlannerState) -> tuple[QualityScore, list[str]]:
-    """规则 fallback 评分"""
+def _rule_risks(state: PlannerState) -> list[str]:
+    """规则 fallback 风险识别"""
     fc = state.forecast_result
     ss = state.safety_stock_result
-
-    interval = (fc.p75 - fc.p25) if fc else 0
-    accuracy = 1.0 if interval < 600 else (0.7 if interval < _INTERVAL_MAX else 0.4)
-
-    completeness = 1.0
-    if not fc:
-        completeness -= 0.5
-    if not ss:
-        completeness -= 0.3
-
-    executability = 1.0 if state.action or state.explain_result else 0.6
-
-    visited  = {a["expert"] for a in state.audit_trail if a.get("status") == "ok"}
-    required = set(state.plan_experts)
-    process  = len(visited & required) / max(len(required), 1)
-
-    biz = 1.0 if (ss and ss.coverage_days >= 7) else 0.6
-
-    quality = QualityScore(
-        accuracy=accuracy, completeness=completeness, compliance=1.0,
-        executability=executability, process_rationality=round(process, 2),
-        business_value=biz,
-    )
-
     risks = []
-    if fc and (fc.p75 - fc.p25) > _INTERVAL_MAX:
+    if fc and (fc.p75 - fc.p25) > 1200:
         risks.append(f"预测区间过宽 ({fc.p75 - fc.p25:.0f})，不确定性高")
     if ss and ss.coverage_days < 7:
         risks.append(f"安全库存覆盖天数不足 ({ss.coverage_days:.1f} 天)")
     if state.task.weather and state.task.weather.alert_level:
         risks.append(f"气象预警: {state.task.weather.alert_level}")
+    return risks
 
-    return quality, risks
+
+def _rule_reflection(quality: QualityScore, risks: list[str], retry_count: int,
+                     state: "PlannerState") -> ReflectionAction:
+    """规则 fallback reflection 决策"""
+    fc = state.forecast_result
+    score = quality.weighted_total
+
+    # 区间过宽强制 escalate
+    if fc and (fc.p75 - fc.p25) > 1200:
+        return ReflectionAction.ESCALATE_HITL
+    if score >= 0.80 and not risks:
+        return ReflectionAction.ACCEPT
+    if score < 0.60 and retry_count < _RETRY_MAX:
+        return ReflectionAction.RETRY_FORECAST
+    if risks:
+        return ReflectionAction.ESCALATE_HITL
+    return ReflectionAction.ACCEPT
 
 
 class CriticAgent(BaseExpertAgent):
@@ -157,35 +229,20 @@ class CriticAgent(BaseExpertAgent):
     def score(self, state: PlannerState) -> tuple[QualityScore, list[str], UncertaintyReport]:
         fc = state.forecast_result
 
-        llm_result = _llm_score(state)
-        if llm_result:
-            reflection_map = {
-                "accept":         ReflectionAction.ACCEPT,
-                "retry_forecast": ReflectionAction.RETRY_FORECAST,
-                "escalate_hitl":  ReflectionAction.ESCALATE_HITL,
-                "abort":          ReflectionAction.ABORT,
-            }
-            quality = QualityScore(
-                accuracy=llm_result["accuracy"],
-                completeness=llm_result["completeness"],
-                compliance=llm_result["compliance"],
-                executability=llm_result["executability"],
-                process_rationality=llm_result["process_rationality"],
-                business_value=llm_result["business_value"],
-            )
-            risks = llm_result.get("risks", [])
-            self._llm_reflection = reflection_map.get(
-                llm_result.get("reflection", "accept"), ReflectionAction.ACCEPT
-            )
-        else:
-            quality, risks = _rule_score(state)
-            self._llm_reflection = None
+        # 规则评分（主路径，稳定可控）
+        quality = _rule_score(state)
 
-        # 气象预警强制注入，不依赖 LLM 判断
+        # LLM 风险识别（语义层面）
+        llm_risks, llm_reflection = _llm_risks(state)
+        risks = llm_risks if llm_risks else _rule_risks(state)
+
+        # 气象预警强制注入
         if state.task.weather and state.task.weather.alert_level:
             alert_msg = f"气象预警: {state.task.weather.alert_level}"
             if not any("气象" in r or "预警" in r for r in risks):
                 risks.append(alert_msg)
+
+        self._llm_reflection = llm_reflection
 
         interval = (fc.p75 - fc.p25) if fc else 0
         tier = ConfidenceTier.AUTO
@@ -205,26 +262,25 @@ class CriticAgent(BaseExpertAgent):
         )
         return quality, risks, uncertainty
 
-    def decide(self, quality: QualityScore, risks: list[str], retry_count: int) -> ReflectionAction:
-        # 优先使用 LLM 的反思决策
-        if hasattr(self, "_llm_reflection") and self._llm_reflection is not None:
-            # 但 retry 次数超限时强制 accept 或 escalate
+    def decide(self, quality: QualityScore, risks: list[str], retry_count: int,
+               state: "PlannerState | None" = None) -> ReflectionAction:
+        if self._llm_reflection is not None:
             if self._llm_reflection == ReflectionAction.RETRY_FORECAST and retry_count >= _RETRY_MAX:
                 return ReflectionAction.ESCALATE_HITL if risks else ReflectionAction.ACCEPT
             return self._llm_reflection
-
-        # fallback 规则
-        if quality.weighted_total >= 0.75 and not any("过宽" in r for r in risks):
+        if state is not None:
+            return _rule_reflection(quality, risks, retry_count, state)
+        # fallback without state
+        score = quality.weighted_total
+        if score >= 0.80 and not risks:
             return ReflectionAction.ACCEPT
-        if retry_count < _RETRY_MAX and quality.accuracy < 0.6:
-            return ReflectionAction.RETRY_FORECAST
         if risks:
             return ReflectionAction.ESCALATE_HITL
         return ReflectionAction.ACCEPT
 
     def _execute(self, state: PlannerState, ctx_data: dict) -> PlannerState:
         quality, risks, uncertainty = self.score(state)
-        reflection = self.decide(quality, risks, state.retry_count)
+        reflection = self.decide(quality, risks, state.retry_count, state)
         state.critic_verdict = CriticVerdict(
             quality=quality,
             uncertainty=uncertainty,
