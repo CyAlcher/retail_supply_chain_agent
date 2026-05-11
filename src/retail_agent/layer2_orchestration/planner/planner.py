@@ -202,6 +202,11 @@ GRAPH = build_graph()
 
 def run(state: PlannerState) -> PlannerState:
     config = {"configurable": {"thread_id": state.task.task_id}}
+    # 清除同 thread_id 的历史 checkpoint，避免 audit_trail 累积
+    try:
+        GRAPH.checkpointer.delete_thread(state.task.task_id)
+    except Exception:
+        pass
     result = GRAPH.invoke(_state_to_dict(state), config=config)
     return _dict_to_state(result)
 
